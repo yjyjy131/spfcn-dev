@@ -51,10 +51,12 @@ class SelectKernel(nn.Module):
         return alpha[0] * self.conv3(x) + alpha[1] * self.conv5(x)
 
 
+# TODO : in, out channel id 의 필요성 ?
 class SpModule(nn.Module):
-    def __init__(self, in_channel, out_channel, device, stride=1):
+    def __init__(self, in_channels_id, out_channels_id, device,
+                 in_channels, out_channels, stride=1):
         nn.Module.__init__(self)
-        self.conv_module = SelectKernel(in_channel, out_channel, stride).to(device)
+        self.conv_module = SelectKernel(in_channels_id, out_channels_id, stride).to(device)
 
     def forward(self, feature):
         return self.conv_module(feature)
