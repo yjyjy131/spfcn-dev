@@ -27,6 +27,8 @@ class SelectKernel(nn.Module):
         self.conv5 = BasicModule(in_channel, out_channel, 5, stride)
         # training 단계에서만 사용됨
         # TODO : Linear output 2?
+
+        # cen 에서 최적의 dilation value 조합을 찾을 수 있도록 kernel 기여도 평가
         self.cen = nn.Sequential(
             nn.Linear(8, 8),
             nn.ReLU(inplace=True),
@@ -34,11 +36,10 @@ class SelectKernel(nn.Module):
             nn.Softmax(dim=0)
         )
 
-    # 위 레이어들을 활용해 논문내 vector alpha 를 계산하는 것
+        self.alpha = torch.Tensor([1., 0.])
+
+    # vector alpha 를 계산
     def forward(self, x):
-        # CEN layer 들어가기 전 vector 값을 계산
-        # TODO : vector 를 계산할 때는 feature x 값이 필요 없다 ?
-        # view(1) nx1 차원 텐서를 1x1 텐서로 변환 [x]
         vector = torch.cat(
             [torch.mean(self.conv3.bn.running_mean).view(1), torch.std(self.conv3.bn.running_mean).view(1),
              torch.mean(self.conv3.bn.running_var).view(1), torch.std(self.conv3.bn.running_var).view(1),
@@ -47,19 +48,41 @@ class SelectKernel(nn.Module):
         )
         print(f'select kernel vector : {vector}')
         print(f'select kernel vector shape : {vector.shape}')
-        alpha = self.cen(vector)
-        return alpha[0] * self.conv3(x) + alpha[1] * self.conv5(x)
+        self.alpha = self.cen(vector)
+        return self.alpha[0] * self.conv3(x) + self.alpha[1] * self.conv5(x)
+
+    # dilation value 들의 효과적 조합을 찾기
+    # to select the convolution kernel with the best receptive fields in a convolutional layer
+    # has several candidate convolution kernels with different dilation values
+    # and its task is to select the best one among them
+    # alpha[0] ( conv3 ) vs alpha[1] ( conv5 )
+    # alpha 가 큰 conv 를 return
+    def auto_select(self, threshold=0.9):
+        return self.conv3 if self.alpha[0] > threshold else self.conv5 if self.alpha[1] > threshold else None
+
+    def enforce_select(self):
+        return self.conv3 if self.alpha[0] > self.alpha[1] else self.conv5
 
 
 # TODO : in, out channel id 의 필요성 ?
+# TODO : SpModule 의 초기 conv_module 은 SelectKernel 인데 BasicModule 로 바뀌는 경우는 어떤 케이스?
 class SpModule(nn.Module):
     def __init__(self, in_channels_id, out_channels_id, device,
                  in_channels, out_channels, stride=1):
         nn.Module.__init__(self)
+        self.device = device
         self.conv_module = SelectKernel(in_channels_id, out_channels_id, stride).to(device)
 
     def forward(self, feature):
         return self.conv_module(feature)
+
+    # SpModule - SelectKernel - BasicModule 의 prune_in_channels 로 갈 수 있나 ? ( 불가능 )
+    # TODO : self.conv_module 이 BasicModule 인 경우만 가능 : channel_id 와 group_id 가 같은 경우 무조건 BasicModule 일까?
+    def prune(self, group_id, prune_idx):
+        if self.in_channels_id == group_id:
+            self.conv_module.prune_in_channels(prune_idx, self.device)
+        elif self.out_channels_id == group_id:
+            self.conv_module.prune_out_channels(prune_idx, self.device)
 
 
 if __name__ == '__main__':
