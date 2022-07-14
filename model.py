@@ -123,6 +123,7 @@ class SlotNetwork(nn.Module):
                 module.prune(group_id, prune_indices)
 
     # TODO : prune_info.indices ? : <function Tensor.indices>
+    # weight 기여도 alpha 를 기준, 기여도 낮으면 kernel 제거
     def prune_channel(self):
         prune_dict = dict()
         for module in self.modules():
