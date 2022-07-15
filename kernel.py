@@ -49,6 +49,7 @@ class BasicModule(nn.Module):
         self.bn.weight = nn.Parameter(w)
         self.bn.bias = nn.Parameter(b)
 
+    # TODO : merge for what ?
     def merge(self, device):
         if not hasattr(self, 'bn'):
             return
@@ -63,7 +64,6 @@ class BasicModule(nn.Module):
         self.rebuild_conv(w, b, device)
 
         self.forward = lambda feature: self.activate(self.conv(feature))
-
 
 
 # conv - bn - relu - conv - bn - relu 구조가 select kernel 하나를 이룸
@@ -138,7 +138,6 @@ class SpModule(nn.Module):
             return -10 * torch.log(self.conv_module.alpha[0] ** 2 + self.conv_module.alpha[1] ** 2)
         elif isinstance(self.conv_module, BasicModule):
             return 0.01 * torch.norm(self.conv_module.conv.weight, p=1)
-
 
 
 if __name__ == '__main__':

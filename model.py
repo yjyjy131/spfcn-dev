@@ -10,15 +10,15 @@ class Hourglass(nn.Module):
     def __init__(self, encoder_dim, group_id, device):
         curr_dim = encoder_dim[0]
         next_dim = encoder_dim[1]
-        self.front = SpModule(group_id-1, group_id, curr_dim, next_dim, device, stride=2)
+        self.front = SpModule(group_id - 1, group_id, curr_dim, next_dim, device, stride=2)
         self.middle = nn.Sequential(
-            SpModule(group_id, group_id+1, next_dim, next_dim, device, stride=1),
-            SpModule(group_id+1, group_id+2, next_dim, next_dim, device, stride=1),
-            SpModule(group_id+2, group_id, next_dim, next_dim, device, stride=1)
-        ) if len(encoder_dim) <= 2 else Hourglass(encoder_dim[1:], group_id+1, device)
-        self.rear = SpModule(group_id, group_id-1, next_dim, curr_dim, device, stride=1)
+            SpModule(group_id, group_id + 1, next_dim, next_dim, device, stride=1),
+            SpModule(group_id + 1, group_id + 2, next_dim, next_dim, device, stride=1),
+            SpModule(group_id + 2, group_id, next_dim, next_dim, device, stride=1)
+        ) if len(encoder_dim) <= 2 else Hourglass(encoder_dim[1:], group_id + 1, device)
+        self.rear = SpModule(group_id, group_id - 1, next_dim, curr_dim, device, stride=1)
 
-# TODO : rear 계산 시 interpolate / return 값은 feature + rear ?
+    # TODO : rear 계산 시 interpolate / return 값은 feature + rear ?
     def forward(self, x):
         front = self.front(x)
         middle = self.middle(front)
@@ -133,35 +133,49 @@ class SlotNetwork(nn.Module):
                 else:
                     prune_dict[module.out_channels_id] = module.conv_module.get_alpha()
 
-        # prune_list : prune_dict 값에서 생성된 (key, val) 형태의 generator 
+        # prune_list : prune_dict 값에서 생성된 (key, val) 형태의 generator
         # prune_list 의 prune_info 는 prune_dict 의 val 값을 의미
         # prune_info 값은 torch tensor 타입 이므로, indices 변수를 가진다
         prune_list = ((key, torch.min(value, dim=0)) for key, value in prune_dict.items() if key >= 0)
         min_group, min_value, min_index = 0, 1, 0
         for group_id, prune_info in prune_list:
             if prune_info.values < 0.02:
-                print("\tAuto Pruned: Group {}, Channel {}, Contribution {:.3f}".format(group_id, prune_info.indices.item(), prune_info.values.item()))
+                print("\tAuto Pruned: Group {}, Channel {}, Contribution {:.3f}".format(group_id,
+                                                                                        prune_info.indices.item(),
+                                                                                        prune_info.values.item()))
                 for module in self.modules():
                     if isinstance(module, SpModule) and isinstance(module.conv_module, BasicModule):
                         module.prune(group_id, prune_info.indices)
                     elif prune_info.values < min_value:
                         min_group, min_value, min_index = group_id, prune_info.values, prune_info.indices
-        pass
 
     def merge(self):
         for module in self.modules():
             if isinstance(module, SpModule) and isinstance(module.conv_module, BasicModule):
                 module.conv_module.merge(module.device)
 
-        # initialize_weights()
-        # train()
+    def get_regularization(self):
+        return sum(module.get_regularization() for module in self.modules() if isinstance(module, SpModule))
 
-        # 1. update_cost
-        # 2. auto select : auto_trainer.update_cost(neg=0.1)
-        # 3. enforce select
-        # 4. prune
-        # 5. fine tuning : auto_trainer.with_regularizatio
-        # 6. merge
+    def get_encoder(self):
+        select_encoder = []
+        channel_encoder = []
+        for module in self.modules():
+            if isinstance(module, SpModule) and isinstance(module.conv_module, BasicModule):
+                select_encoder.append(module.conv_module.conv.kernel_size[0])
+                channel_encoder.append(module.conv_module.conv.in_channels)
+        channel_encoder.append(channel_encoder[-1])
+        return select_encoder, channel_encoder
+
+    def rebuild_network(self, select_encoder, channel_encoder):
+        for module in self.modules():
+            if isinstance(module, SpModule):
+                module.conv_module = BasicModule(channel_encoder.pop(0),
+                                                 channel_encoder[0],
+                                                 select_encoder.pop(0),
+                                                 module.conv_module.conv3.conv.stride).to(module.device)
+                module.conv_module.merge(module.device)
+
 
 if __name__ == '__main__':
     pass
